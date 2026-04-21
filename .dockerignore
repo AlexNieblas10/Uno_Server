@@ -1,0 +1,11 @@
+.git
+.idea
+target/
+*.iml
+.DS_Store
+.mvn/
+mvnw
+mvnw.cmd
+README.md
+*.md
+dependency-reduced-pom.xml
