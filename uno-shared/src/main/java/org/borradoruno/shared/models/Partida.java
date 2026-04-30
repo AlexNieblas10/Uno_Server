@@ -14,6 +14,7 @@ public class Partida {
     private List<Jugador> jugadores;
     private Mazo mazo;
     private PilaDescarte pilaDescarte;
+    private long turnoIniciadoEn;
 
     public Partida(String idPartida) {
         this.idPartida = idPartida;
@@ -49,4 +50,6 @@ public class Partida {
     public void setMazo(Mazo mazo) { this.mazo = mazo; }
     public PilaDescarte getPilaDescarte() { return pilaDescarte; }
     public void setPilaDescarte(PilaDescarte pilaDescarte) { this.pilaDescarte = pilaDescarte; }
+    public long getTurnoIniciadoEn() { return turnoIniciadoEn; }
+    public void setTurnoIniciadoEn(long t) { this.turnoIniciadoEn = t; }
 }

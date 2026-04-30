@@ -8,8 +8,10 @@ public class Jugador {
     private String idSesion;
     private boolean esAnfitrion;
     private boolean dijoUNO;
+    private boolean listo;
     private int puntos;
     private List<Carta> mano;
+    private String avatar;
 
     public Jugador(String nombre, String idSesion) {
         this.nombre = nombre;
@@ -18,6 +20,7 @@ public class Jugador {
         this.dijoUNO = false;
         this.puntos = 0;
         this.mano = new ArrayList<>();
+        this.avatar = "AZUL";
     }
 
     // Getters and Setters
@@ -33,6 +36,10 @@ public class Jugador {
     public void setPuntos(int puntos) { this.puntos = puntos; }
     public List<Carta> getMano() { return mano; }
     public void setMano(List<Carta> mano) { this.mano = mano; }
+    public boolean isListo() { return listo; }
+    public void setListo(boolean listo) { this.listo = listo; }
+    public String getAvatar() { return avatar; }
+    public void setAvatar(String avatar) { this.avatar = avatar; }
 
     @Override
     public boolean equals(Object o) {

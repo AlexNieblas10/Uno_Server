@@ -73,14 +73,27 @@ public class ClientHandler implements Runnable {
         try {
             switch (mensaje.getTipo()) {
                 case "CREATE":
-                case "JOIN":
-                    // Validación: Verificar que datos no sea null
+                case "JOIN": {
+                    // Datos: puede ser String o [nombre, avatar] o [nombre, codigo, avatar]
                     if (mensaje.getDatos() == null) {
                         enviarError("El nombre no puede ser null");
                         return;
                     }
 
-                    String nombre = (String) mensaje.getDatos();
+                    String nombre;
+                    String avatarStr = "AZUL";
+
+                    if (mensaje.getDatos() instanceof java.util.List) {
+                        java.util.List<?> lista = (java.util.List<?>) mensaje.getDatos();
+                        nombre = lista.get(0).toString();
+                        // CREATE: [nombre, avatar]  |  JOIN: [nombre, codigo, avatar]
+                        int avatarIdx = mensaje.getTipo().equals("CREATE") ? 1 : 2;
+                        if (lista.size() > avatarIdx) {
+                            avatarStr = lista.get(avatarIdx).toString();
+                        }
+                    } else {
+                        nombre = mensaje.getDatos().toString();
+                    }
 
                     // Validación: Nickname
                     ValidationResult nicknameResult = InputValidator.validateNickname(nombre);
@@ -103,6 +116,7 @@ public class ClientHandler implements Runnable {
                             JuegoManager.getInstance().getPartidaActual().setEstado(EstadoPartida.ESPERANDO_JUGADORES);
                         }
                         this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
+                        this.jugador.setAvatar(avatarStr);
                         JuegoManager.getInstance().agregarJugador(this.jugador);
                         server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
                     } else {
@@ -113,10 +127,12 @@ public class ClientHandler implements Runnable {
                             return;
                         }
                         this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
+                        this.jugador.setAvatar(avatarStr);
                         JuegoManager.getInstance().agregarJugador(this.jugador);
                         server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
                     }
                     break;
+                }
                 case "SET_MAX_JUGADORES":
                     // Validación: Datos no null
                     if (mensaje.getDatos() == null) {
@@ -155,14 +171,17 @@ public class ClientHandler implements Runnable {
                     JuegoManager.getInstance().iniciarPartida();
                     server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
                     break;
-                case "TIRAR_CARTA":
-                    // Convertimos explícitamente los datos a un objeto Carta
+                case "TIRAR_CARTA": {
                     String cJson = gson.toJson(mensaje.getDatos());
                     org.borradoruno.shared.models.Carta cartaTirada = gson.fromJson(cJson, org.borradoruno.shared.models.Carta.class);
 
-                    JuegoManager.getInstance().procesarJugada(this.jugador, cartaTirada);
-                    server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    if (JuegoManager.getInstance().procesarJugada(this.jugador, cartaTirada)) {
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    } else {
+                        enviarError("Movimiento inválido");
+                    }
                     break;
+                }
                 case "TIRAR_COMODIN":
                     try {
                         // El mensaje contiene [Carta, Color]
@@ -186,8 +205,11 @@ public class ClientHandler implements Runnable {
 
                         Color colorElegido = Color.valueOf(colorStr.toUpperCase());
 
-                        JuegoManager.getInstance().procesarJugadaComodin(this.jugador, comodin, colorElegido);
-                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                        if (JuegoManager.getInstance().procesarJugadaComodin(this.jugador, comodin, colorElegido)) {
+                            server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                        } else {
+                            enviarError("Movimiento inválido con comodín");
+                        }
 
                     } catch (Exception e) {
                         System.err.println("Error procesando comodín: " + e.getMessage());
@@ -196,8 +218,23 @@ public class ClientHandler implements Runnable {
                     }
                     break;
                 case "ROBAR_CARTA":
-                    JuegoManager.getInstance().robarCarta(this.jugador);
-                    server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    if (JuegoManager.getInstance().robarCarta(this.jugador)) {
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    } else {
+                        enviarError("No es tu turno para robar");
+                    }
+                    break;
+                case "REINICIAR_PARTIDA":
+                    if (this.jugador != null && this.jugador.isEsAnfitrion()) {
+                        JuegoManager.getInstance().reiniciarPartida();
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    }
+                    break;
+                case "MARCAR_LISTO":
+                    if (this.jugador != null) {
+                        JuegoManager.getInstance().marcarListo(this.jugador);
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    }
                     break;
                 case "DECIR_UNO":
                     JuegoManager.getInstance().marcarUno(this.jugador);
@@ -208,6 +245,19 @@ public class ClientHandler implements Runnable {
                     JuegoManager.getInstance().removerJugador(this.jugador);
                     server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
                     break;
+                case "ATRAPAR_UNO": {
+                    if (mensaje.getDatos() == null) {
+                        enviarError("Nombre de víctima no puede ser null");
+                        return;
+                    }
+                    String nombreVictima = mensaje.getDatos().toString();
+                    if (JuegoManager.getInstance().atraparUno(nombreVictima)) {
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    } else {
+                        enviarError("No se puede atrapar a " + nombreVictima + " (ya dijo UNO o no tiene 1 carta)");
+                    }
+                    break;
+                }
                 case "SOLICITAR_ESTADO":
                     enviar(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
                     break;
