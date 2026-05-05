@@ -3,8 +3,6 @@ package org.borradoruno.server.network;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import org.borradoruno.server.logic.JuegoManager;
-import org.borradoruno.server.validation.InputValidator;
-import org.borradoruno.server.validation.ValidationResult;
 import org.borradoruno.shared.models.*;
 import org.borradoruno.shared.network.Mensaje;
 
@@ -74,63 +72,9 @@ public class ClientHandler implements Runnable {
             switch (mensaje.getTipo()) {
                 case "CREATE":
                 case "JOIN": {
-                    // Datos: puede ser String o [nombre, avatar] o [nombre, codigo, avatar]
-                    if (mensaje.getDatos() == null) {
-                        enviarError("El nombre no puede ser null");
-                        return;
-                    }
-
-                    String nombre;
-                    String avatarStr = "AZUL";
-
-                    if (mensaje.getDatos() instanceof java.util.List) {
-                        java.util.List<?> lista = (java.util.List<?>) mensaje.getDatos();
-                        nombre = lista.get(0).toString();
-                        // CREATE: [nombre, avatar]  |  JOIN: [nombre, codigo, avatar]
-                        int avatarIdx = mensaje.getTipo().equals("CREATE") ? 1 : 2;
-                        if (lista.size() > avatarIdx) {
-                            avatarStr = lista.get(avatarIdx).toString();
-                        }
-                    } else {
-                        nombre = mensaje.getDatos().toString();
-                    }
-
-                    // Validación: Nickname
-                    ValidationResult nicknameResult = InputValidator.validateNickname(nombre);
-                    if (!nicknameResult.isValid()) {
-                        enviar(gson.toJson(new Mensaje("ERROR", nicknameResult.getErrorMessage())));
-                        return;
-                    }
-
-                    // Validación: Unicidad del nickname
-                    if (isNicknameTaken(nombre)) {
-                        enviar(gson.toJson(new Mensaje("ERROR", "El apodo '" + nombre + "' ya está en uso")));
-                        return;
-                    }
-
-                    if (mensaje.getTipo().equals("CREATE")) {
-                        // Si no hay jugadores, reiniciamos la partida para una nueva sesión limpia
-                        if (JuegoManager.getInstance().getPartidaActual().getJugadores().isEmpty()) {
-                            JuegoManager.getInstance().iniciarPartida();
-                            JuegoManager.getInstance().getPartidaActual().getJugadores().clear();
-                            JuegoManager.getInstance().getPartidaActual().setEstado(EstadoPartida.ESPERANDO_JUGADORES);
-                        }
-                        this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
-                        this.jugador.setAvatar(avatarStr);
-                        JuegoManager.getInstance().agregarJugador(this.jugador);
-                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
-                    } else {
-                        // JOIN
-                        Partida p = JuegoManager.getInstance().getPartidaActual();
-                        if (p.getJugadores().size() >= p.getMaxJugadores()) {
-                            enviar(gson.toJson(new Mensaje("ERROR", "La sala está llena")));
-                            return;
-                        }
-                        this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
-                        this.jugador.setAvatar(avatarStr);
-                        JuegoManager.getInstance().agregarJugador(this.jugador);
-                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
-                    }
+                    // STUB: Caso de uso "Registrar Jugador" movido a rama feature/registrar-jugador
+                    enviar(gson.toJson(new Mensaje("ERROR",
+                        "Registro no disponible en main. Ver rama feature/registrar-jugador")));
                     break;
                 }
                 case "SET_MAX_JUGADORES":
@@ -281,16 +225,4 @@ public class ClientHandler implements Runnable {
         enviar(gson.toJson(new Mensaje("ERROR", mensajeError)));
     }
 
-    /**
-     * Verifica si un nickname ya está siendo usado por otro jugador
-     */
-    private boolean isNicknameTaken(String nombre) {
-        Partida partida = JuegoManager.getInstance().getPartidaActual();
-        if (partida == null || partida.getJugadores() == null) {
-            return false;
-        }
-        return partida.getJugadores()
-                .stream()
-                .anyMatch(j -> j.getNombre().equalsIgnoreCase(nombre));
-    }
 }
