@@ -59,6 +59,7 @@ public class ClientHandler implements Runnable {
 
                     String sesionId = socket.getRemoteSocketAddress().toString();
                     String respuesta = dispatcher.despachar(mensaje, jugadorPortador, sesionId);
+                    this.jugador = jugadorPortador.get();
 
                     if (respuesta != null) {
                         enviar(respuesta);
