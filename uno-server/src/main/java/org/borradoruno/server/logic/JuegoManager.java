@@ -281,6 +281,43 @@ public class JuegoManager {
         System.out.println(jugador.getNombre() + " está listo");
     }
 
+    /**
+     * Verifica si un apodo ya está siendo usado en la partida actual.
+     * Movido desde ClientHandler para mantener la comunicación separada de la lógica.
+     */
+    public synchronized boolean verificarNicknameUnico(String nombre) {
+        if (partidaActual == null || partidaActual.getJugadores() == null) return false;
+        return partidaActual.getJugadores().stream()
+                .anyMatch(j -> j.getNombre().equalsIgnoreCase(nombre));
+    }
+
+    /**
+     * Prepara el estado de la sala y registra al jugador.
+     * Encapsula toda la lógica de negocio de CREATE/JOIN que antes vivía en ClientHandler.
+     *
+     * @param esCrear true si el mensaje es CREATE, false si es JOIN
+     * @return el Jugador creado, o null si la sala está llena (JOIN)
+     */
+    public synchronized Jugador prepararYRegistrarJugador(String nombre, String avatarStr,
+                                                           String sesionId, boolean esCrear) {
+        if (esCrear) {
+            if (partidaActual.getJugadores().isEmpty()) {
+                iniciarPartida();
+                partidaActual.getJugadores().clear();
+                partidaActual.setEstado(org.borradoruno.shared.models.EstadoPartida.ESPERANDO_JUGADORES);
+            }
+        } else {
+            if (partidaActual.getJugadores().size() >= partidaActual.getMaxJugadores()) {
+                return null;
+            }
+        }
+
+        Jugador jugador = new Jugador(nombre, sesionId);
+        jugador.setAvatar(avatarStr);
+        agregarJugador(jugador);
+        return jugador;
+    }
+
     public synchronized void marcarUno(Jugador jugador) {
         if (jugador.getMano().size() == 1) {
             jugador.setDijoUNO(true);

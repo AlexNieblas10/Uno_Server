@@ -3,6 +3,8 @@ package org.borradoruno.server.network;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import org.borradoruno.server.logic.JuegoManager;
+import org.borradoruno.server.validation.InputValidator;
+import org.borradoruno.server.validation.ValidationResult;
 import org.borradoruno.shared.models.*;
 import org.borradoruno.shared.network.Mensaje;
 
@@ -12,18 +14,26 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 
+/**
+ * Maneja la comunicación TCP con un cliente.
+ * Solo lee/escribe del socket y delega toda lógica a MessageDispatcher.
+ */
 public class ClientHandler implements Runnable {
-    private Socket socket;
-    private Server server;
+
+    private final Socket socket;
+    private final Server server;
+    private final Gson gson;
+    private final MessageDispatcher dispatcher;
+    private final MessageDispatcher.JugadorPortador jugadorPortador;
     private PrintWriter out;
     private BufferedReader in;
-    private Gson gson;
-    private Jugador jugador;
 
     public ClientHandler(Socket socket, Server server) {
         this.socket = socket;
         this.server = server;
         this.gson = new Gson();
+        this.dispatcher = new MessageDispatcher(server);
+        this.jugadorPortador = new MessageDispatcher.JugadorPortador(null);
     }
 
     @Override
@@ -32,23 +42,28 @@ public class ClientHandler implements Runnable {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            String inputLine;
-            while ((inputLine = in.readLine()) != null) {
-                // Validación: Ignorar líneas vacías
-                if (inputLine.trim().isEmpty()) {
-                    continue;
-                }
+            String linea;
+            while ((linea = in.readLine()) != null) {
+                if (linea.trim().isEmpty()) continue;
 
                 try {
-                    Mensaje mensaje = gson.fromJson(inputLine, Mensaje.class);
+                    Mensaje mensaje = gson.fromJson(linea, Mensaje.class);
 
-                    // Validación: Verificar que el mensaje no sea null y tenga tipo
                     if (mensaje == null || mensaje.getTipo() == null) {
                         enviarError("Mensaje inválido");
                         continue;
                     }
 
-                    procesarMensaje(mensaje);
+                    System.out.println("Comando recibido: " + mensaje.getTipo()
+                            + " con datos: " + mensaje.getDatos());
+
+                    String sesionId = socket.getRemoteSocketAddress().toString();
+                    String respuesta = dispatcher.despachar(mensaje, jugadorPortador, sesionId);
+
+                    if (respuesta != null) {
+                        enviar(respuesta);
+                    }
+
                 } catch (Exception e) {
                     System.err.println("Error parseando JSON: " + e.getMessage());
                     enviarError("Error de formato JSON");
@@ -72,9 +87,63 @@ public class ClientHandler implements Runnable {
             switch (mensaje.getTipo()) {
                 case "CREATE":
                 case "JOIN": {
-                    // STUB: Caso de uso "Registrar Jugador" movido a rama feature/registrar-jugador
-                    enviar(gson.toJson(new Mensaje("ERROR",
-                        "Registro no disponible en main. Ver rama feature/registrar-jugador")));
+                    // Datos: puede ser String o [nombre, avatar] o [nombre, codigo, avatar]
+                    if (mensaje.getDatos() == null) {
+                        enviarError("El nombre no puede ser null");
+                        return;
+                    }
+
+                    String nombre;
+                    String avatarStr = "AZUL";
+
+                    if (mensaje.getDatos() instanceof java.util.List) {
+                        java.util.List<?> lista = (java.util.List<?>) mensaje.getDatos();
+                        nombre = lista.get(0).toString();
+                        // CREATE: [nombre, avatar]  |  JOIN: [nombre, codigo, avatar]
+                        int avatarIdx = mensaje.getTipo().equals("CREATE") ? 1 : 2;
+                        if (lista.size() > avatarIdx) {
+                            avatarStr = lista.get(avatarIdx).toString();
+                        }
+                    } else {
+                        nombre = mensaje.getDatos().toString();
+                    }
+
+                    // Validación: Nickname
+                    ValidationResult nicknameResult = InputValidator.validateNickname(nombre);
+                    if (!nicknameResult.isValid()) {
+                        enviar(gson.toJson(new Mensaje("ERROR", nicknameResult.getErrorMessage())));
+                        return;
+                    }
+
+                    // Validación: Unicidad del nickname
+                    if (isNicknameTaken(nombre)) {
+                        enviar(gson.toJson(new Mensaje("ERROR", "El apodo '" + nombre + "' ya está en uso")));
+                        return;
+                    }
+
+                    if (mensaje.getTipo().equals("CREATE")) {
+                        // Si no hay jugadores, reiniciamos la partida para una nueva sesión limpia
+                        if (JuegoManager.getInstance().getPartidaActual().getJugadores().isEmpty()) {
+                            JuegoManager.getInstance().iniciarPartida();
+                            JuegoManager.getInstance().getPartidaActual().getJugadores().clear();
+                            JuegoManager.getInstance().getPartidaActual().setEstado(EstadoPartida.ESPERANDO_JUGADORES);
+                        }
+                        this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
+                        this.jugador.setAvatar(avatarStr);
+                        JuegoManager.getInstance().agregarJugador(this.jugador);
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    } else {
+                        // JOIN
+                        Partida p = JuegoManager.getInstance().getPartidaActual();
+                        if (p.getJugadores().size() >= p.getMaxJugadores()) {
+                            enviar(gson.toJson(new Mensaje("ERROR", "La sala está llena")));
+                            return;
+                        }
+                        this.jugador = new Jugador(nombre, socket.getRemoteSocketAddress().toString());
+                        this.jugador.setAvatar(avatarStr);
+                        JuegoManager.getInstance().agregarJugador(this.jugador);
+                        server.broadcast(gson.toJson(new Mensaje("ESTADO_PARTIDA", JuegoManager.getInstance().getPartidaActual())));
+                    }
                     break;
                 }
                 case "SET_MAX_JUGADORES":
@@ -213,16 +282,23 @@ public class ClientHandler implements Runnable {
     }
 
     public void enviar(String mensajeJson) {
-        if (out != null) {
-            out.println(mensajeJson);
-        }
+        if (out != null) out.println(mensajeJson);
     }
 
-    /**
-     * Método helper para enviar mensajes de error al cliente
-     */
     private void enviarError(String mensajeError) {
         enviar(gson.toJson(new Mensaje("ERROR", mensajeError)));
     }
 
+    /**
+     * Verifica si un nickname ya está siendo usado por otro jugador
+     */
+    private boolean isNicknameTaken(String nombre) {
+        Partida partida = JuegoManager.getInstance().getPartidaActual();
+        if (partida == null || partida.getJugadores() == null) {
+            return false;
+        }
+        return partida.getJugadores()
+                .stream()
+                .anyMatch(j -> j.getNombre().equalsIgnoreCase(nombre));
+    }
 }
