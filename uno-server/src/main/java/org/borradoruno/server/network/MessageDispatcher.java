@@ -87,6 +87,10 @@ public class MessageDispatcher {
                     return gson.toJson(new Mensaje("ESTADO_PARTIDA",
                             JuegoManager.getInstance().getPartidaActual()));
 
+                case "HANDSHAKE":
+                case "PING":
+                    return null; // ignorar silenciosamente
+
                 default:
                     return error("Tipo de mensaje desconocido: " + mensaje.getTipo());
             }
